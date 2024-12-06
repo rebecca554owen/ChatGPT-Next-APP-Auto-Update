@@ -1,47 +1,104 @@
+# 工作流名称
 name: Build APK
 
+# 触发条件：手动触发，并添加tag_name输入
 on:
   workflow_dispatch:
-  issues:
-    types:
-      - opened
+    inputs:
+      tag_name:
+        description: 'Release tag version'
+        required: true
+        default: '1.0.0'
 
+# 任务定义
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # 使用最新版Ubuntu作为运行环境
+    
     steps: 
+      # 检出主仓库代码
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      # 克隆子模块仓库
       - name: Checkout submodules
         run: git clone https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web.git
+
+      # 设置Node.js环境并配置缓存
       - name: Setup NodeJs
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 20  # 使用Node.js 20版本
+          cache: 'yarn'  # 添加yarn缓存
+
+      # 设置Flutter环境并配置缓存
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          flutter-version: 3.24.1
+          channel: stable  # 使用稳定版
+          flutter-version: 3.24.1  # 指定Flutter版本
+          cache: true  # 启用Flutter缓存
+
+      # 恢复依赖缓存（调整到依赖安装之前）
+      - name: Restore dependencies cache
+        uses: actions/cache@v3
+        id: deps-cache
+        with:
+          path: |
+            ./ChatGPT-Next-Web/node_modules
+            ~/.pub-cache
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/yarn.lock', '**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
+      # 安装Cloudflare的next-on-pages工具
       - name: Install @cloudflare/next-on-pages
         working-directory: ./ChatGPT-Next-Web
         run: npm i @cloudflare/next-on-pages
+
+      # 安装项目依赖（仅在缓存未命中时执行）
       - name: Install Deps
         working-directory: ./ChatGPT-Next-Web
         run: yarn install
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+
+      # 构建网站
       - name: Build Site
         working-directory: ./ChatGPT-Next-Web
         run: npx @cloudflare/next-on-pages@1
+
+      # 压缩HTML文件
       - name: Zip HTML
         working-directory: ./ChatGPT-Next-Web/.vercel/output
         run: mv static web && zip -q -r web.zip ./web/
+        
+      # 移动压缩文件到assets目录
       - name: Move Zip File
         run: mkdir assets && ls ./ChatGPT-Next-Web/.vercel/output/ && mv ./ChatGPT-Next-Web/.vercel/output/web.zip ./assets/ && ls ./assets
+
+      # 构建APK文件
       - name: Build APK
         run: flutter build apk --release
+
+      # 上传生成的APK文件
       - name: Upload apk
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      # 设置构建时间
+      - name: Set build time
+        run: |
+          echo "BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+
+      # 创建GitHub Release并包含构建时间
+      - name: Create GitHub Release with Build Time
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+          tag_name: ${{ github.event.inputs.tag_name }}
+          body: "Build time: ${{ env.BUILD_TIME }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
