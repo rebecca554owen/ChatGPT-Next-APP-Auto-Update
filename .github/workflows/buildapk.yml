@@ -1,47 +1,92 @@
+# 工作流名称
 name: Build APK
 
+# 触发条件：手动触发
 on:
   workflow_dispatch:
-  issues:
-    types:
-      - opened
 
+# 任务定义
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # 使用最新版Ubuntu作为运行环境
+    
     steps: 
+      # 检出主仓库代码
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      # 克隆子模块仓库
       - name: Checkout submodules
         run: git clone https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web.git
+
+      # 设置Node.js环境
       - name: Setup NodeJs
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 20  # 使用Node.js 20版本
+
+      # 设置Flutter环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          flutter-version: 3.24.1
+          channel: stable  # 使用稳定版
+          flutter-version: 3.24.1  # 指定Flutter版本
+
+      # 安装Cloudflare的next-on-pages工具
       - name: Install @cloudflare/next-on-pages
         working-directory: ./ChatGPT-Next-Web
         run: npm i @cloudflare/next-on-pages
+
+      # 安装项目依赖
       - name: Install Deps
         working-directory: ./ChatGPT-Next-Web
         run: yarn install
+
+      # 构建网站
       - name: Build Site
         working-directory: ./ChatGPT-Next-Web
         run: npx @cloudflare/next-on-pages@1
+
+      # 压缩HTML文件
       - name: Zip HTML
         working-directory: ./ChatGPT-Next-Web/.vercel/output
         run: mv static web && zip -q -r web.zip ./web/
+        
+      # 移动压缩文件到assets目录
       - name: Move Zip File
         run: mkdir assets && ls ./ChatGPT-Next-Web/.vercel/output/ && mv ./ChatGPT-Next-Web/.vercel/output/web.zip ./assets/ && ls ./assets
+
+      # 构建APK文件
       - name: Build APK
         run: flutter build apk --release
+
+      # 上传生成的APK文件
       - name: Upload apk
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      # 发布到GitHub Release
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: dev
+          release_name: Dev Release
+          draft: false
+          prerelease: true
+
+      # 上传APK到Release
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/app/outputs/flutter-apk/app-release.apk
+          asset_name: app-release.apk
+          asset_content_type: application/vnd.android.package-archive
