@@ -6,21 +6,21 @@ on:
       - opened
   workflow_dispatch:
     inputs:
-      tag_name:
+      tag:
         description: 'Release tag version'
         required: true
-        default: '1.0.0'
+        default: '1.0.2'
 
 jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    steps: 
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Checkout submodules
-        run: git clone https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web.git
+        run: git clone --depth 1 https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web.git
 
       - name: Setup NodeJs
         uses: actions/setup-node@v4
@@ -33,52 +33,83 @@ jobs:
           channel: stable
           flutter-version: 3.24.1
 
-      - name: Install @cloudflare/next-on-pages
-        working-directory: ./ChatGPT-Next-Web
-        run: npm i @cloudflare/next-on-pages
+      - name: Cache Node Modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ChatGPT-Next-Web/node_modules
+            ~/.cache/yarn
+          key: ${{ runner.os }}-node-${{ hashFiles('ChatGPT-Next-Web/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
-      - name: Install Deps
+      - name: Install Dependencies
         working-directory: ./ChatGPT-Next-Web
-        run: yarn install
+        run: |
+          if [ ! -f yarn.lock ]; then
+            echo "Generating initial yarn.lock"
+            yarn install --mode=update-lockfile
+          fi
+          npm i @cloudflare/next-on-pages
+          yarn install --frozen-lockfile
 
       - name: Build Site
         working-directory: ./ChatGPT-Next-Web
         run: npx @cloudflare/next-on-pages@1
 
-      - name: Zip HTML
-        working-directory: ./ChatGPT-Next-Web/.vercel/output
-        run: mv static web && zip -q -r web.zip ./web/
-        
-      - name: Move Zip File
-        run: mkdir assets && ls ./ChatGPT-Next-Web/.vercel/output/ && mv ./ChatGPT-Next-Web/.vercel/output/web.zip ./assets/ && ls ./assets
+      - name: Package Web Assets
+        run: |
+          cd ChatGPT-Next-Web/.vercel/output
+          mv static web
+          zip -q -r web.zip ./web/
+          mkdir -p $GITHUB_WORKSPACE/assets
+          mv web.zip $GITHUB_WORKSPACE/assets/
+          if [ ! -f $GITHUB_WORKSPACE/assets/web.zip ]; then
+            echo "Error: web.zip not found in assets directory"
+            exit 1
+          fi
+
+      - name: Update Version in pubspec.yaml
+        run: |
+          TAG=$(echo "${{ github.event.inputs.tag }}" | sed 's/^v//')
+          sed -i "s/^version: .*/version: $TAG+${BUILD_NUMBER}/" pubspec.yaml
 
       - name: Build APK
         run: flutter build apk --release
 
-      - name: Upload apk
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release
-          path: build/app/outputs/flutter-apk/app-release.apk
-          
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            assets/web.zip
+
       - name: Set build time
         run: |
           echo "BUILD_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
-      
-      - name: Delete Release
-        run: |
-          RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.tag_name }}" \
-            | jq -r '.id')
-          curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
 
-      - name: Create GitHub Release with Build Time
-        uses: softprops/action-gh-release@v2
+      - name: Determine Release Tag
+        id: get-tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG=$(git describe --tags --abbrev=0 || echo "v0.0.0")
+          fi
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
-          tag_name: ${{ github.event.inputs.tag_name }}
+          draft: false
+          allowUpdates: true
+          makeLatest: false
+          tag: ${{ env.TAG }}
+          artifacts: |
+            build/app/outputs/flutter-apk/app-release.apk
+            assets/web.zip
           body: |
             Build time: ${{ env.BUILD_TIME }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
