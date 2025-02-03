@@ -73,7 +73,7 @@ jobs:
       - name: Update Version in pubspec.yaml
         run: |
           TAG=$(echo "${{ github.event.inputs.tag }}" | sed 's/^v//')
-          sed -i "s/^version: .*/version: $TAG+${BUILD_NUMBER}/" pubspec.yaml
+          sed -i "s/^version: .*/version: $TAG+$GITHUB_RUN_NUMBER/" pubspec.yaml
 
       - name: Build APK
         run: flutter build apk --release
