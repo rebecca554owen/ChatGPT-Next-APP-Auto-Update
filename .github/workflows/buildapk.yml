@@ -1,46 +1,84 @@
 name: Build APK
 
 on:
-  issues:
-    types:
-      - opened
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: 
+    inputs:
+      tag:
+        description: 'Release tag version'
+        required: true
+        default: 'v0.0.0'
 
 jobs:
+
   release:
     name: Release
     runs-on: ubuntu-latest
+
     steps: 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
       - name: Checkout submodules
-        run: git clone https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web.git
+        run: git clone --depth 1 https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web.git
+
       - name: Setup NodeJs
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: 3.24.1
+
       - name: Install @cloudflare/next-on-pages
         working-directory: ./ChatGPT-Next-Web
         run: npm i @cloudflare/next-on-pages
+
       - name: Install Deps
         working-directory: ./ChatGPT-Next-Web
         run: yarn install
+
       - name: Build Site
         working-directory: ./ChatGPT-Next-Web
         run: npx @cloudflare/next-on-pages@1
+
       - name: Zip HTML
         working-directory: ./ChatGPT-Next-Web/.vercel/output
         run: mv static web && zip -q -r web.zip ./web/
+
       - name: Move Zip File
         run: mkdir assets && ls ./ChatGPT-Next-Web/.vercel/output/ && mv ./ChatGPT-Next-Web/.vercel/output/web.zip ./assets/ && ls ./assets
+
       - name: Build APK
         run: flutter build apk --release
+
       - name: Upload apk
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Get release tag
+        id: get-tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.APP_NAME }}_${{ env.BUILD_NUMBER }}_windows_amd64.zip
+          tag_name: ${{ steps.get-tag.outputs.tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
