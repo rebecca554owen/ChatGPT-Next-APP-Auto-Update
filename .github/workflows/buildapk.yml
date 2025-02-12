@@ -59,16 +59,10 @@ jobs:
           mkdir -p ../../../assets
           zip -qr ../../../assets/web.zip ./web/
 
-      - name: Build APK
-        run: flutter build apk --release
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assets
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            assets/web.zip
+      - name: Fetch secrets
+        run: |
+          curl -u ${{ secrets.BASIC_AUTH }} -o android/app/app.key ${{ secrets.URL_PREFIX }}app.key
+          curl -u ${{ secrets.BASIC_AUTH }} -o android/key.properties ${{ secrets.URL_PREFIX }}key.properties
 
       - name: Get release tag
         id: get-tag
@@ -80,6 +74,23 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Update version in pubspec.yaml
+        run: |
+          TAG=${{ steps.get-tag.outputs.tag }}
+          # 使用运行次数和尝试次数组合
+          sed -i "s/^version: .*/version: ${TAG#v}+${{ github.run_number }}.${{ github.run_attempt }}/" pubspec.yaml
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            assets/web.zip
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -87,8 +98,7 @@ jobs:
             build/app/outputs/flutter-apk/app-release.apk
             assets/web.zip
           tag_name: ${{ steps.get-tag.outputs.tag }}
-          generate_changelog: true
-          changelog: auto from latest_release
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
