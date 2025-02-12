@@ -42,12 +42,6 @@ jobs:
         working-directory: ./ChatGPT-Next-Web
         run: yarn add @cloudflare/next-on-pages && yarn install --frozen-lockfile
 
-      - name: Cache node modules
-        uses: actions/cache@v4
-        with:
-          path: ./ChatGPT-Next-Web/node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('**/ChatGPT-Next-Web/yarn.lock') }}
-
       - name: Build Site
         working-directory: ./ChatGPT-Next-Web
         run: npx @cloudflare/next-on-pages@1
@@ -58,6 +52,27 @@ jobs:
           mv static web
           mkdir -p ../../../assets
           zip -qr ../../../assets/web.zip ./web/
+
+      - name: Fetch secrets
+        run: |
+          curl -u ${{ secrets.BASIC_AUTH }} -o android/app/app.key ${{ secrets.URL_PREFIX }}app.key
+          curl -u ${{ secrets.BASIC_AUTH }} -o android/key.properties ${{ secrets.URL_PREFIX }}key.properties
+
+      - name: Get release tag
+        id: get-tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update version in pubspec.yaml
+        run: |
+          TAG=${{ steps.get-tag.outputs.tag }}
+          # 使用运行次数和尝试次数组合
+          sed -i "s/^version: .*/version: ${TAG#v}+${{ github.run_number }}.${{ github.run_attempt }}/" pubspec.yaml
 
       - name: Build APK
         run: flutter build apk --release
@@ -70,16 +85,6 @@ jobs:
             build/app/outputs/flutter-apk/app-release.apk
             assets/web.zip
 
-      - name: Get release tag
-        id: get-tag
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -87,8 +92,6 @@ jobs:
             build/app/outputs/flutter-apk/app-release.apk
             assets/web.zip
           tag_name: ${{ steps.get-tag.outputs.tag }}
-          generate_changelog: true
-          changelog: auto from latest_release
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
