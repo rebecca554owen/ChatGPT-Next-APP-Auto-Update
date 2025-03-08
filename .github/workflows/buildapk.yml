@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
+  workflow_dispatch: 
     inputs:
       tag:
         description: 'Release tag version'
@@ -16,7 +16,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
 
-    steps:
+    steps: 
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -38,17 +38,9 @@ jobs:
           channel: stable
           flutter-version: 3.24.1
 
-      - name: Cache node modules
-        uses: actions/cache@v4
-        with:
-          path: ./ChatGPT-Next-Web/node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('ChatGPT-Next-Web/yarn.lock') }}
-
       - name: Install Dependencies
         working-directory: ./ChatGPT-Next-Web
-        run: |
-          # 移除 `yarn add`，依赖需通过 package.json 声明
-          yarn install --frozen-lockfile
+        run: yarn add @cloudflare/next-on-pages && yarn install --frozen-lockfile
 
       - name: Build Site
         working-directory: ./ChatGPT-Next-Web
