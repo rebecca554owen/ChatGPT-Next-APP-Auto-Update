@@ -24,7 +24,7 @@ if (flutterVersionName == null) {
 
 android {
     namespace "net.aithing.nextchat"
-    compileSdk flutter.compileSdkVersion
+    compileSdk 35
     ndkVersion flutter.ndkVersion
 
     compileOptions {
